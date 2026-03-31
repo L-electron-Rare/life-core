@@ -167,10 +167,13 @@ async def list_models():
     
     models: set[str] = set()
     for provider_id in router.list_available_providers():
-        provider = router.providers[provider_id]
-        provider_models = await provider.list_models()
-        models.update(provider_models)
-    
+        try:
+            provider = router.providers[provider_id]
+            provider_models = await provider.list_models()
+            models.update(provider_models)
+        except Exception as e:
+            logger.warning(f"Failed to list models for {provider_id}: {e}")
+
     return ModelsResponse(models=sorted(list(models)))
 
 
@@ -204,11 +207,18 @@ async def stats():
     if not chat_service:
         raise HTTPException(status_code=500, detail="Chat service not initialized")
     
+    try:
+        chat_stats = chat_service.get_stats()
+    except Exception:
+        chat_stats = {}
+    try:
+        router_status = router.get_provider_status() if router else {}
+    except Exception:
+        router_status = {}
+
     return {
-        "chat_service": chat_service.get_stats(),
-        "router": {
-            "status": router.get_provider_status() if router else {},
-        },
+        "chat_service": chat_stats,
+        "router": {"status": router_status},
     }
 
 
