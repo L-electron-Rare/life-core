@@ -150,12 +150,11 @@ async def health():
         raise HTTPException(status_code=500, detail="Router not initialized")
     
     providers = router.list_available_providers()
-    health = await router.health_check_all()
-    
+
     return HealthResponse(
         status="ok",
         providers=providers,
-        cache_available=True,
+        cache_available=cache is not None,
     )
 
 
