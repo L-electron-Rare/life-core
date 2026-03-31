@@ -7,9 +7,13 @@ import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
+from opentelemetry import trace
+
 from life_core.router.providers.base import LLMProvider, LLMResponse, LLMStreamChunk
+from life_core.telemetry import get_tracer
 
 logger = logging.getLogger("life_core.router")
+tracer = get_tracer()
 
 
 class Router:
@@ -153,21 +157,37 @@ class Router:
             if pid != primary_provider and self._health_status.get(pid, True):
                 providers_to_try.append(pid)
         
-        for provider_id in providers_to_try:
-            try:
-                provider = self.providers[provider_id]
-                if not self._health_status.get(provider_id, True):
-                    logger.debug(f"Skipping unhealthy provider: {provider_id}")
+        with tracer.start_as_current_span("llm.call") as span:
+            span.set_attribute("llm.model", model)
+            span.set_attribute("llm.provider.hint", primary_provider)
+            
+            for fallback_index, provider_id in enumerate(providers_to_try):
+                try:
+                    provider = self.providers[provider_id]
+                    if not self._health_status.get(provider_id, True):
+                        logger.debug(f"Skipping unhealthy provider: {provider_id}")
+                        continue
+                    
+                    span.set_attribute("llm.provider", provider_id)
+                    span.set_attribute("llm.fallback_index", fallback_index)
+                    
+                    response = await provider.send(messages=messages, model=model, **kwargs)
+                    self._health_status[provider_id] = True
+                    
+                    # Ajouter les tokens à la span
+                    if response.usage:
+                        span.set_attribute("llm.tokens.input", response.usage.get("input_tokens", 0))
+                        span.set_attribute("llm.tokens.output", response.usage.get("output_tokens", 0))
+                    
+                    logger.info(f"Response from {provider_id}")
+                    return response
+                except Exception as e:
+                    logger.warning(f"Provider {provider_id} failed: {e}")
+                    self._health_status[provider_id] = False
+                    if fallback_index == len(providers_to_try) - 1:
+                        # Dernière tentative
+                        span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
                     continue
-                
-                response = await provider.send(messages=messages, model=model, **kwargs)
-                self._health_status[provider_id] = True
-                logger.info(f"Response from {provider_id}")
-                return response
-            except Exception as e:
-                logger.warning(f"Provider {provider_id} failed: {e}")
-                self._health_status[provider_id] = False
-                continue
         
         raise RuntimeError(f"All providers failed for model {model}")
 

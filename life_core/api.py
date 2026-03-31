@@ -12,9 +12,11 @@ from pydantic import BaseModel
 
 from life_core.cache import MultiTierCache
 from life_core.rag import RAGPipeline
+from life_core.rag.api import rag_router, set_rag_pipeline
 from life_core.router import ClaudeProvider, GoogleProvider, GroqProvider, MistralProvider, OpenAIProvider, Router
 from life_core.router.providers.ollama import OllamaProvider
 from life_core.services import ChatService
+from life_core.langfuse_tracing import flush_langfuse, init_langfuse
 from life_core.telemetry import init_telemetry
 
 logger = logging.getLogger("life_core.api")
@@ -36,6 +38,7 @@ async def lifespan(app: FastAPI):
 
     # Initialize OpenTelemetry (no-op if OTEL_EXPORTER_OTLP_ENDPOINT not set)
     init_telemetry()
+    init_langfuse()
 
     # Initialiser le routeur
     router = Router()
@@ -85,7 +88,8 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"RAG initialization failed: {e}")
         rag = None
-    
+    set_rag_pipeline(rag)
+
     # Créer le service de chat
     chat_service = ChatService(router=router, cache=cache, rag=rag)
     
@@ -96,6 +100,7 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     logger.info("Shutting down life-core API")
+    flush_langfuse()
 
 
 # Créer l'app
@@ -106,6 +111,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.include_router(rag_router)
+
 # CORS
 allowed_origins = os.environ.get("ALLOWED_ORIGINS", "*").split(",")
 app.add_middleware(
@@ -115,6 +122,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# OpenTelemetry instrumentations
+try:
+    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+    from opentelemetry.instrumentation.httpx import HttpxClientInstrumentor
+    
+    FastAPIInstrumentor().instrument_app(app)
+    HttpxClientInstrumentor().instrument()
+    logger.info("OpenTelemetry auto-instrumentation for FastAPI/httpx enabled")
+except ImportError:
+    logger.debug("OpenTelemetry instrumentation packages not available (no-op)")
 
 
 # Models
