@@ -13,6 +13,8 @@ from pydantic import BaseModel
 from life_core.cache import MultiTierCache
 from life_core.rag import RAGPipeline
 from life_core.rag.api import rag_router, set_rag_pipeline
+from life_core.infra_api import infra_router
+from life_core.traces_api import traces_router
 from life_core.router import ClaudeProvider, GoogleProvider, GroqProvider, MistralProvider, OpenAIProvider, Router
 from life_core.router.providers.ollama import OllamaProvider
 from life_core.services import ChatService
@@ -112,6 +114,8 @@ app = FastAPI(
 )
 
 app.include_router(rag_router)
+app.include_router(infra_router)
+app.include_router(traces_router)
 
 # CORS
 allowed_origins = os.environ.get("ALLOWED_ORIGINS", "*").split(",")
