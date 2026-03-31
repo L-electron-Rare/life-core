@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import math
+import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -85,20 +86,62 @@ class DocumentChunker:
 
 
 class EmbeddingModel:
-    """Modèle d'embeddings simple."""
+    """Modèle d'embeddings simple.
+
+    Priorité de résolution :
+    1. Ollama (OLLAMA_URL env var, modèle nomic-embed-text) — léger, pas de dépendance lourde.
+    2. sentence-transformers (fallback si Ollama indisponible).
+    """
+
+    OLLAMA_EMBED_MODEL = "nomic-embed-text"
 
     def __init__(self, model_name: str = "sentence-transformers/all-MiniLM-L6-v2"):
         """
         Créer un modèle d'embeddings.
-        
+
         Args:
-            model_name: Nom du modèle HuggingFace
+            model_name: Nom du modèle HuggingFace (utilisé si Ollama indisponible)
         """
         self.model_name = model_name
         self._model = None
 
+    async def _embed_via_ollama(self, texts: list[str]) -> list[list[float]] | None:
+        """
+        Générer des embeddings via l'API Ollama.
+
+        Args:
+            texts: Liste de textes à embedder.
+
+        Returns:
+            Liste de vecteurs, ou None si Ollama est indisponible.
+        """
+        ollama_url = os.environ.get("OLLAMA_URL")
+        if not ollama_url:
+            return None
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                embeddings: list[list[float]] = []
+                for text in texts:
+                    resp = await client.post(
+                        f"{ollama_url}/api/embed",
+                        json={"model": self.OLLAMA_EMBED_MODEL, "input": text},
+                    )
+                    if resp.status_code != 200:
+                        logger.warning(
+                            "Ollama embed returned HTTP %s, falling back to sentence-transformers",
+                            resp.status_code,
+                        )
+                        return None
+                    data = resp.json()
+                    embeddings.append(data["embeddings"][0])
+                return embeddings
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Ollama embed failed (%s), falling back to sentence-transformers", exc)
+            return None
+
     async def _get_model(self):
-        """Charger le modèle de manière lazy."""
+        """Charger le modèle sentence-transformers de manière lazy."""
         if self._model is None:
             try:
                 from sentence_transformers import SentenceTransformer
@@ -106,20 +149,24 @@ class EmbeddingModel:
             except ImportError:
                 raise ImportError(
                     "sentence-transformers package requis. "
-                    "Installez avec: pip install sentence-transformers"
+                    "Installez avec: pip install sentence-transformers  "
+                    "(ou définissez OLLAMA_URL pour utiliser Ollama)"
                 )
         return self._model
 
     async def embed(self, text: str) -> list[float]:
         """
         Générer un embedding pour un texte.
-        
+
         Args:
             text: Texte à embedder
-            
+
         Returns:
             Vecteur d'embedding
         """
+        results = await self._embed_via_ollama([text])
+        if results is not None:
+            return results[0]
         model = await self._get_model()
         embedding = model.encode(text, convert_to_tensor=False)
         return embedding.tolist()
@@ -127,13 +174,16 @@ class EmbeddingModel:
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
         """
         Générer des embeddings pour plusieurs textes.
-        
+
         Args:
             texts: Liste de textes
-            
+
         Returns:
             Liste de vecteurs
         """
+        results = await self._embed_via_ollama(texts)
+        if results is not None:
+            return results
         model = await self._get_model()
         embeddings = model.encode(texts, convert_to_tensor=False)
         return embeddings.tolist()
