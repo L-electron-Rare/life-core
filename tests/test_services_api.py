@@ -75,8 +75,8 @@ async def test_chat_service_cache_then_hit():
     first = await svc.chat(messages=messages, model="m1")
     second = await svc.chat(messages=messages, model="m1")
 
-    assert first == "ok:hello"
-    assert second == "ok:hello"
+    assert first["content"] == "ok:hello"
+    assert second["content"] == "ok:hello"
     assert cache.set_calls == 1
     assert svc.stats["requests"] == 2
     assert svc.stats["cache_hits"] == 1
@@ -88,13 +88,13 @@ async def test_chat_service_rag_augmentation():
     router = _StubRouter()
     svc = ChatService(router=router, cache=cache, rag=_StubRag())
 
-    content = await svc.chat(
+    result = await svc.chat(
         messages=[{"role": "user", "content": "question"}],
         model="m1",
         use_rag=True,
     )
 
-    assert "Context:" in content
+    assert "Context:" in result["content"]
 
 
 @pytest.mark.asyncio

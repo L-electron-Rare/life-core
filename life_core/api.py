@@ -209,15 +209,15 @@ async def chat(request: ChatRequest):
         raise HTTPException(status_code=500, detail="Chat service not initialized")
     
     try:
-        response_content = await chat_service.chat(
+        result = await chat_service.chat(
             messages=request.messages,
             model=request.model,
             provider=request.provider,
             use_rag=request.use_rag,
         )
-        
+
         return ChatResponse(
-            content=response_content,
+            content=result["content"],
             model=request.model,
             provider=request.provider or "auto",
         )

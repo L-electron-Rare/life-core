@@ -41,19 +41,19 @@ class ChatService:
         provider: str | None = None,
         use_rag: bool = False,
         **kwargs
-    ) -> str:
+    ) -> dict[str, Any]:
         """
         Échanger un message avec un LLM.
-        
+
         Args:
             messages: Liste de messages
             model: Modèle à utiliser
             provider: Provider spécifique (optionnel)
             use_rag: Utiliser le RAG (optionnel)
             **kwargs: Paramètres additionnels
-            
+
         Returns:
-            Réponse de l'assistant
+            Dict avec 'content' (str) et 'usage' (dict)
         """
         self.stats["requests"] += 1
 
@@ -86,10 +86,15 @@ class ChatService:
             **kwargs
         )
 
-        # Cacher la réponse
-        await self.cache.set(cache_key, response.content, ttl=3600)
+        result = {
+            "content": response.content,
+            "usage": response.usage if hasattr(response, "usage") else {},
+        }
 
-        return response.content
+        # Cacher la réponse
+        await self.cache.set(cache_key, result, ttl=3600)
+
+        return result
 
     async def stream_chat(
         self,

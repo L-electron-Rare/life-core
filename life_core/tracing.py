@@ -6,6 +6,7 @@ import time
 import logging
 from typing import Any
 
+from opentelemetry.trace import StatusCode
 from .telemetry import get_tracer, get_meter
 
 logger = logging.getLogger("life_core.tracing")
@@ -66,5 +67,5 @@ async def traced_llm_call(
             duration_ms = (time.monotonic() - start) * 1000
             _llm_errors.add(1, {"provider": provider_name, "model": model, "error": type(e).__name__})
             span.set_attribute("llm.error", str(e))
-            span.set_status_code(2)  # ERROR
+            span.set_status(StatusCode.ERROR, str(e))
             raise
