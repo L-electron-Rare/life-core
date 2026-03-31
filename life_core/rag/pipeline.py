@@ -210,18 +210,24 @@ class RAGPipeline:
     def __init__(
         self,
         chunk_size: int = 512,
-        embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+        embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2",
+        qdrant_url: str | None = None,
     ):
         """
         Créer un pipeline RAG.
-        
+
         Args:
             chunk_size: Taille des chunks
             embedding_model: Modèle d'embeddings
+            qdrant_url: URL Qdrant optionnelle (si None, utilise le store en mémoire)
         """
         self.chunker = DocumentChunker(chunk_size=chunk_size)
         self.embeddings = EmbeddingModel(model_name=embedding_model)
-        self.vector_store = VectorStore()
+        if qdrant_url:
+            from .qdrant_store import QdrantVectorStore
+            self.vector_store = QdrantVectorStore(url=qdrant_url)
+        else:
+            self.vector_store = VectorStore()
         self.stats = {"documents": 0, "chunks": 0}
 
     async def index_document(self, document: Document) -> None:

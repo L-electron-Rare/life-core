@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from life_core.cache import MultiTierCache
 from life_core.rag import RAGPipeline
 from life_core.router import ClaudeProvider, GoogleProvider, GroqProvider, MistralProvider, OpenAIProvider, Router
+from life_core.router.providers.ollama import OllamaProvider
 from life_core.services import ChatService
 
 logger = logging.getLogger("life_core.api")
@@ -55,14 +56,27 @@ async def lifespan(app: FastAPI):
     if os.getenv("GROQ_API_KEY"):
         groq = GroqProvider(api_key=os.getenv("GROQ_API_KEY"))
         router.register_provider(groq)
-    
+
+    # Ollama local (Tower)
+    ollama_url = os.environ.get("OLLAMA_URL")
+    if ollama_url:
+        router.register_provider(OllamaProvider(base_url=ollama_url, name="ollama"))
+        logger.info(f"Registered Ollama provider at {ollama_url}")
+
+    # Ollama remote (KXKM-AI via Tailscale)
+    ollama_remote_url = os.environ.get("OLLAMA_REMOTE_URL")
+    if ollama_remote_url:
+        router.register_provider(OllamaProvider(base_url=ollama_remote_url, name="ollama-gpu"))
+        logger.info(f"Registered Ollama GPU provider at {ollama_remote_url}")
+
     # Initialiser le cache
     redis_url = os.getenv("REDIS_URL")
     cache = MultiTierCache(redis_url=redis_url)
     
     # Initialiser le RAG (optionnel)
     try:
-        rag = RAGPipeline()
+        qdrant_url = os.environ.get("QDRANT_URL")
+        rag = RAGPipeline(qdrant_url=qdrant_url)
         logger.info("RAG pipeline initialized")
     except Exception as e:
         logger.warning(f"RAG initialization failed: {e}")
@@ -89,9 +103,10 @@ app = FastAPI(
 )
 
 # CORS
+allowed_origins = os.environ.get("ALLOWED_ORIGINS", "*").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
