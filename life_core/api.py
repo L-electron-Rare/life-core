@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from life_core.cache import MultiTierCache
 from life_core.rag import RAGPipeline
@@ -292,6 +292,23 @@ async def stats():
         "chat_service": chat_stats,
         "router": {"status": router_status},
     }
+
+
+class FeedbackRequest(BaseModel):
+    trace_id: str
+    score: float = Field(ge=0, le=1)
+    comment: str | None = None
+
+@app.post("/feedback")
+async def post_feedback(req: FeedbackRequest):
+    from life_core.langfuse_tracing import score_trace
+    score_trace(
+        trace_id=req.trace_id,
+        name="user-feedback",
+        value=req.score,
+        comment=req.comment,
+    )
+    return {"status": "ok"}
 
 
 if __name__ == "__main__":
