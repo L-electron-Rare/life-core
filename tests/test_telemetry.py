@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from life_core.router import Router, ClaudeProvider, OpenAIProvider
+from life_core.router import Router, LLMProvider
 from life_core.router.providers.base import LLMResponse
 
 
@@ -12,20 +12,20 @@ async def test_router_spans_emitted():
     """Vérifier que les spans sont émis lors d'un appel routeur."""
     from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
     from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.sdk. trace.export import SimpleSpanProcessor
-    
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+
     # Setup exporter en mémoire
     exporter = InMemorySpanExporter()
     tracer_provider = TracerProvider()
     tracer_provider.add_span_processor(SimpleSpanProcessor(exporter))
-    
-    from opentelemetry import trace
-    trace.set_tracer_provider(tracer_provider)
-    
+
+    # Patch get_tracer to use our test provider (set_tracer_provider is one-shot in OTEL)
+    test_tracer = tracer_provider.get_tracer("life_core.router")
+
     # Créer un routeur avec un mock provider
     router = Router()
-    
-    mock_provider = AsyncMock(spec=ClaudeProvider)
+
+    mock_provider = AsyncMock(spec=LLMProvider)
     mock_provider.provider_id = "test-provider"
     mock_provider.send = AsyncMock(return_value=LLMResponse(
         content="test response",
@@ -33,18 +33,16 @@ async def test_router_spans_emitted():
         provider="test-provider",
         usage={"input_tokens": 10, "output_tokens": 20}
     ))
-    
+
     router.register_provider(mock_provider, is_primary=True)
-    
-    # Appeler le routeur
-    from life_core.telemetry import init_telemetry
-    init_telemetry()
-    
-    response = await router.send(
-        messages=[{"role": "user", "content": "Hello"}],
-        model="test-model"
-    )
-    
+
+    # Patch the module-level tracer in the router (resolved at import time)
+    with patch("life_core.router.router.tracer", test_tracer):
+        response = await router.send(
+            messages=[{"role": "user", "content": "Hello"}],
+            model="test-model"
+        )
+
     # Vérifier les spans émis
     spans = exporter.get_finished_spans()
     

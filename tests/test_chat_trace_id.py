@@ -14,6 +14,7 @@ from life_core.services.chat import ChatService
 @pytest.mark.asyncio
 async def test_chat_returns_trace_id():
     """chat() should return trace_id from current OTEL span."""
+    previous_tp = otel_trace.get_tracer_provider()
     exporter = InMemorySpanExporter()
     tp = SdkTracerProvider()
     tp.add_span_processor(SimpleSpanProcessor(exporter))
@@ -37,12 +38,13 @@ async def test_chat_returns_trace_id():
     assert "trace_id" in result
     assert len(result["trace_id"]) == 32
 
-    otel_trace.set_tracer_provider(otel_trace.NoOpTracerProvider())
+    otel_trace.set_tracer_provider(previous_tp)
 
 
 @pytest.mark.asyncio
 async def test_chat_returns_empty_trace_id_without_otel():
     """chat() should return empty trace_id when no OTEL span is active."""
+    previous = otel_trace.get_tracer_provider()
     otel_trace.set_tracer_provider(otel_trace.NoOpTracerProvider())
 
     mock_router = MagicMock()
@@ -58,3 +60,5 @@ async def test_chat_returns_empty_trace_id_without_otel():
     )
 
     assert "trace_id" in result
+
+    otel_trace.set_tracer_provider(previous)

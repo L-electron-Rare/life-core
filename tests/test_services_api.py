@@ -160,9 +160,10 @@ async def test_api_lifespan_with_mocked_providers(monkeypatch):
     import life_core.api as api
 
     class _P:
-        def __init__(self, api_key=None):
-            self.provider_id = "p"
+        def __init__(self, models=None, ollama_api_base=None, **kwargs):
+            self.provider_id = "litellm"
             self.is_available = True
+            self.models = models or []
 
         async def send(self, messages, model, **kwargs):
             return LLMResponse(content="ok", model=model, provider="p")
@@ -179,9 +180,7 @@ async def test_api_lifespan_with_mocked_providers(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "a")
     monkeypatch.setenv("OPENAI_API_KEY", "b")
     monkeypatch.setenv("GOOGLE_API_KEY", "c")
-    monkeypatch.setattr(api, "ClaudeProvider", _P)
-    monkeypatch.setattr(api, "OpenAIProvider", _P)
-    monkeypatch.setattr(api, "GoogleProvider", _P)
+    monkeypatch.setattr(api, "LiteLLMProvider", _P)
 
     async with api.lifespan(api.app):
         assert api.router is not None

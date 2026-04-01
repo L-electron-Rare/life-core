@@ -204,6 +204,7 @@ async def test_list_models():
 @pytest.mark.asyncio
 async def test_send_passes_otel_trace_id_in_metadata():
     """send() should inject current OTEL trace_id into litellm metadata."""
+    previous_tp = otel_trace.get_tracer_provider()
     exporter = InMemorySpanExporter()
     tp = SdkTracerProvider()
     tp.add_span_processor(SimpleSpanProcessor(exporter))
@@ -231,5 +232,5 @@ async def test_send_passes_otel_trace_id_in_metadata():
     assert "span_id" in kwargs["metadata"]
     assert len(kwargs["metadata"]["span_id"]) == 16  # 64-bit hex
 
-    # Cleanup
-    otel_trace.set_tracer_provider(otel_trace.NoOpTracerProvider())
+    # Cleanup — restore previous provider to avoid polluting other tests
+    otel_trace.set_tracer_provider(previous_tp)

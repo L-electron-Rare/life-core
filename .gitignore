@@ -1,22 +1,87 @@
-# OS
+# OS & System
 .DS_Store
+.AppleDouble
+.LSOverride
+thumbsdb
+
+# IDE & Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.vim/
+.emacs.d/
+.cursor*
+.windsurf*
+.clinerules*
 
 # Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.Python
 .venv/
 venv/
+ENV/
+.mypy_cache/
+.dmypy.json
+dmypy.json
 .pytest_cache/
 .coverage
 htmlcov/
 *.egg-info/
-
-# Node
-node_modules/
 dist/
-coverage/
-.vite/
+build/
+.eggs/
 
-# IDE
-.vscode/
-.idea/
+# Node / JavaScript
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm/
+.node_modules/
+
+# Package managers
+yarn.lock
+pnpm-lock.yaml
+package-lock.json
+
+# Build & Cache
+dist/
+.vite/
+.turbo/
+.next/
+out/
+build/
+coverage/
+.cache/
+
+# Environment
+.env
+.env.prod
+.env.local
+.env.*.local
+
+# IDE generated
+.vscode/settings.json
+.cursor/
+.vscode/extensions/
+
+# Custom agent/memory
+.claude/
+.remember/
+.superpowers/
+.memories/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Temporary
+tmp/
+temp/
+*.tmp
