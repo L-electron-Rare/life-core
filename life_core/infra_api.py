@@ -103,6 +103,18 @@ async def network_status():
         except Exception as e:
             checks["ollama_gpu"] = {"status": "down", "error": str(e), "url": ollama_remote}
 
+    # vLLM GPU (KXKM-AI via proxy)
+    vllm_url = os.environ.get("VLLM_BASE_URL", "")
+    if vllm_url:
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                await client.get(f"{vllm_url}/health")
+                models_resp = await client.get(f"{vllm_url}/v1/models")
+                model_list = [m["id"] for m in models_resp.json().get("data", [])]
+                checks["vllm_gpu"] = {"status": "up", "models": model_list, "url": vllm_url}
+        except Exception as e:
+            checks["vllm_gpu"] = {"status": "down", "error": str(e), "url": vllm_url}
+
     # Jaeger
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
