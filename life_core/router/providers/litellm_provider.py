@@ -92,7 +92,7 @@ class LiteLLMProvider(LLMProvider):
     def _to_llm_response(self, response, model: str) -> LLMResponse:
         choice = response.choices[0]
         usage = response.usage
-        return LLMResponse(
+        llm_response = LLMResponse(
             content=choice.message.content or "",
             model=response.model or model,
             provider="litellm",
@@ -101,3 +101,12 @@ class LiteLLMProvider(LLMProvider):
                 "output_tokens": usage.completion_tokens if usage else 0,
             },
         )
+        try:
+            cost = litellm.completion_cost(completion_response=response)
+            from life_core.telemetry import get_meter
+            meter = get_meter()
+            cost_counter = meter.create_counter("llm.cost", description="LLM call cost in USD")
+            cost_counter.add(cost, {"model": response.model or model, "provider": "litellm"})
+        except Exception:
+            pass  # Cost calculation not critical
+        return llm_response

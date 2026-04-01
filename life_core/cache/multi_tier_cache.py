@@ -229,6 +229,10 @@ class MultiTierCache:
         """
         self.l1 = L1Cache(max_size=l1_max_size)
         self.l2 = L2Cache(redis_url=redis_url)
+        from life_core.telemetry import get_meter
+        meter = get_meter()
+        self._hits_counter = meter.create_counter("cache.hits", description="Cache hit count")
+        self._misses_counter = meter.create_counter("cache.misses", description="Cache miss count")
 
     async def get(self, key: str, default: Any = None) -> Any:
         """
@@ -244,6 +248,7 @@ class MultiTierCache:
             value = self.l1.get(key)
             span.set_attribute("cache.hit", value is not None)
             if value is not None:
+                self._hits_counter.add(1, {"tier": "l1"})
                 return value
 
         # Essayer L2
@@ -251,10 +256,12 @@ class MultiTierCache:
             value = await self.l2.get(key)
             span.set_attribute("cache.hit", value is not None)
             if value is not None:
+                self._hits_counter.add(1, {"tier": "l2"})
                 # Repeupler L1
                 self.l1.set(key, value)
                 return value
 
+        self._misses_counter.add(1)
         return default
 
     async def set(
