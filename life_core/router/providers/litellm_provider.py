@@ -1,159 +1,92 @@
-"""Provider adapter pour LiteLLM."""
-
-from __future__ import annotations
-
+"""LiteLLM unified provider — single entry point for all LLM backends."""
 import logging
-from typing import Any
+from collections.abc import AsyncIterator
 
-from life_core.router.providers.base import LLMProvider, LLMResponse, LLMStreamChunk
+import litellm
 
-logger = logging.getLogger("life_core.router.providers.litellm")
+from .base import LLMProvider, LLMResponse, LLMStreamChunk
 
-try:
-    import litellm
-except ImportError:
-    litellm = None
+logger = logging.getLogger(__name__)
 
 
 class LiteLLMProvider(LLMProvider):
+    """Routes all LLM calls through litellm.acompletion().
+
+    Model names use LiteLLM format: "openai/gpt-4o", "anthropic/claude-sonnet-4-20250514", etc.
+    API keys are read from standard env vars by LiteLLM (OPENAI_API_KEY, ANTHROPIC_API_KEY, ...).
     """
-    Adapter LiteLLM comme provider dans le routeur life-core.
-    
-    Utilise litellm pour accéder à 100+ LLMs en une interface unifiée.
-    Compatible OpenAI.
-    """
-    
-    def __init__(self, model_prefix: str = "", api_key: str | None = None):
-        """
-        Créer le provider LiteLLM.
-        
-        Args:
-            model_prefix: Prefix pour les noms de modèles (ex: "openai/", "anthropic/")
-            api_key: Clé API (optionnel, fallback sur env vars)
-        """
-        if litellm is None:
-            raise ImportError(
-                "litellm not installed. Install with: pip install 'life-core[litellm]'"
-            )
-        
-        self.provider_id = "litellm"
-        self.model_prefix = model_prefix
-        self.api_key = api_key
-        logger.info(f"LiteLLMProvider initialized with prefix={model_prefix}")
-    
-    async def send(
+
+    def __init__(
         self,
-        messages: list[dict[str, str]],
-        model: str,
-        **kwargs
-    ) -> LLMResponse:
-        """
-        Envoyer un message via litellm.
-        
-        Args:
-            messages: Liste de messages (role/content)
-            model: Nom du modèle
-            **kwargs: Paramètres additionnels
-            
-        Returns:
-            Réponse normalisée LLMResponse
-        """
-        # Ajouter le prefix au model
-        full_model = f"{self.model_prefix}{model}" if self.model_prefix else model
-        
-        try:
-            # Appel synchrone via litellm.completion
-            response = litellm.completion(
-                model=full_model,
-                messages=messages,
-                **kwargs
-            )
-            
-            # Normaliser vers LLMResponse
-            return LLMResponse(
-                content=response.choices[0].message.content or "",
-                model=model,
-                provider=self.provider_id,
-                usage={
-                    "input_tokens": response.usage.prompt_tokens if response.usage else 0,
-                    "output_tokens": response.usage.completion_tokens if response.usage else 0,
-                },
-                metadata={
-                    "finish_reason": response.choices[0].finish_reason,
-                }
-            )
-        except Exception as e:
-            logger.error(f"LiteLLM request failed: {e}")
-            raise
-    
-    async def stream(
-        self,
-        messages: list[dict[str, str]],
-        model: str,
-        **kwargs
+        models: list[str],
+        ollama_api_base: str | None = None,
+        **kwargs,
     ):
-        """
-        Streamer une réponse via litellm.
-        
-        Args:
-            messages: Liste de messages
-            model: Nom du modèle
-            **kwargs: Paramètres additionnels
-            
-        Yields:
-            Chunks de type LLMStreamChunk
-        """
-        full_model = f"{self.model_prefix}{model}" if self.model_prefix else model
-        
-        try:
-            # litellm.completion(..., stream=True) retourne un itérateur
-            response_stream = litellm.completion(
-                model=full_model,
-                messages=messages,
-                stream=True,
-                **kwargs
-            )
-            
-            for chunk in response_stream:
-                content = ""
-                finish_reason = None
-                
-                if chunk.choices:
-                    choice = chunk.choices[0]
-                    if choice.delta and choice.delta.content:
-                        content = choice.delta.content
-                    if choice.finish_reason:
-                        finish_reason = choice.finish_reason
-                
+        super().__init__(provider_id="litellm", **kwargs)
+        self.models = models
+        self.ollama_api_base = ollama_api_base
+
+    async def send(self, messages: list[dict], model: str, **kwargs) -> LLMResponse:
+        call_kwargs = self._build_call_kwargs(model, kwargs)
+        response = await litellm.acompletion(
+            model=model,
+            messages=messages,
+            **call_kwargs,
+        )
+        return self._to_llm_response(response, model)
+
+    async def stream(
+        self, messages: list[dict], model: str, **kwargs
+    ) -> AsyncIterator[LLMStreamChunk]:
+        call_kwargs = self._build_call_kwargs(model, kwargs)
+        response = await litellm.acompletion(
+            model=model,
+            messages=messages,
+            stream=True,
+            **call_kwargs,
+        )
+        async for chunk in response:
+            delta = chunk.choices[0].delta if chunk.choices else None
+            if delta and delta.content:
                 yield LLMStreamChunk(
-                    content=content,
+                    content=delta.content,
                     model=model,
-                    finish_reason=finish_reason,
+                    finish_reason=chunk.choices[0].finish_reason,
                 )
-        except Exception as e:
-            logger.error(f"LiteLLM stream request failed: {e}")
-            raise
-    
+
     async def health_check(self) -> bool:
-        """
-        Vérifier la santé du provider.
-        
-        Returns:
-            True si le provider est accessible
-        """
-        # Pour LiteLLM, on suppose que c'est OK si l'import a réussi
-        # Une implémentation réelle verrait un test de modèle
-        return True
-    
-    async def list_models(self) -> list[str]:
-        """
-        Lister les modèles disponibles.
-        
-        Returns:
-            Liste approximative (voir litellm.get_all_models())
-        """
+        if not self.models:
+            return False
         try:
-            # litellm expose une liste de modèles supportés
-            return litellm.model_list or []
-        except Exception:
-            return []
+            await litellm.acompletion(
+                model=self.models[0],
+                messages=[{"role": "user", "content": "ping"}],
+                max_tokens=1,
+                **self._build_call_kwargs(self.models[0], {}),
+            )
+            return True
+        except Exception as e:
+            logger.warning("LiteLLM health check failed: %s", e)
+            return False
+
+    async def list_models(self) -> list[str]:
+        return list(self.models)
+
+    def _build_call_kwargs(self, model: str, extra: dict) -> dict:
+        kwargs = dict(extra)
+        if model.startswith("ollama/") and self.ollama_api_base:
+            kwargs["api_base"] = self.ollama_api_base
+        return kwargs
+
+    def _to_llm_response(self, response, model: str) -> LLMResponse:
+        choice = response.choices[0]
+        usage = response.usage
+        return LLMResponse(
+            content=choice.message.content or "",
+            model=response.model or model,
+            provider="litellm",
+            usage={
+                "input_tokens": usage.prompt_tokens if usage else 0,
+                "output_tokens": usage.completion_tokens if usage else 0,
+            },
+        )
