@@ -15,8 +15,8 @@ dependencies = [
     "opentelemetry-api>=1.33,<2",
     "opentelemetry-sdk>=1.33,<2",
     "opentelemetry-exporter-otlp-proto-grpc>=1.33,<2",
-    "opentelemetry-instrumentation-fastapi>=0.50b0",
-    "opentelemetry-instrumentation-httpx>=0.50b0",
+    "opentelemetry-instrumentation-fastapi>=0.50b0,<1",
+    "opentelemetry-instrumentation-httpx>=0.50b0,<1",
     "litellm>=1.30,<2",
     "langfuse>=2.60,<3",
     "camoufox>=0.4,<1",
@@ -45,4 +45,4 @@ testpaths = ["tests"]
 python_files = "test_*.py"
 python_functions = "test_*"
 pythonpath = ["."]
-addopts = "--cov=life_core --cov-report=term-missing --cov-fail-under=60"
+addopts = "--cov=life_core --cov-report=term-missing --cov-fail-under=80"
