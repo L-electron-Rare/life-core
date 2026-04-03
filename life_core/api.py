@@ -14,6 +14,8 @@ from life_core.cache import MultiTierCache
 from life_core.rag import RAGPipeline
 from life_core.rag.api import rag_router, set_rag_pipeline
 from life_core.infra_api import infra_router
+from life_core.monitoring_api import monitoring_router
+from life_core.ws_alerts import ws_router as ws_alerts_router
 from life_core.traces_api import traces_router
 from life_core.stats_api import stats_router
 from life_core.logs_api import logs_router
@@ -158,6 +160,8 @@ app = FastAPI(
 
 app.include_router(rag_router)
 app.include_router(infra_router)
+app.include_router(monitoring_router)
+app.include_router(ws_alerts_router)
 app.include_router(traces_router)
 app.include_router(stats_router)
 app.include_router(logs_router)

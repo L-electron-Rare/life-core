@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time as _time
 
 import httpx
 from fastapi import APIRouter
@@ -15,23 +16,81 @@ infra_router = APIRouter(prefix="/infra", tags=["Infra"])
 
 @infra_router.get("/containers")
 async def list_containers():
-    """List Docker containers via Tower's Docker socket proxy or SSH."""
-    # For now, return static data from environment
-    # Future: use Docker SDK or proxy
-    return {
-        "containers": [
-            {"name": "life-core", "status": "healthy", "cpu": "~0.05%", "memory": "~92 MiB"},
-            {"name": "life-reborn", "status": "healthy", "cpu": "~0.01%", "memory": "~21 MiB"},
-            {"name": "life-web", "status": "healthy", "cpu": "~0.00%", "memory": "~13 MiB"},
-            {"name": "redis", "status": "healthy", "cpu": "~0.28%", "memory": "~5 MiB"},
-            {"name": "qdrant", "status": "running", "cpu": "~0.05%", "memory": "~58 MiB"},
-            {"name": "forgejo", "status": "running", "cpu": "~0.07%", "memory": "~98 MiB"},
-            {"name": "langfuse", "status": "running", "cpu": "~0.10%", "memory": "~150 MiB"},
-            {"name": "jaeger", "status": "running", "cpu": "~0.02%", "memory": "~30 MiB"},
-            {"name": "otel-collector", "status": "running", "cpu": "~0.01%", "memory": "~25 MiB"},
-            {"name": "traefik", "status": "running", "cpu": "~0.00%", "memory": "~19 MiB"},
+    """List Docker containers via Tower's Docker socket proxy."""
+    docker_host = os.environ.get("DOCKER_HOST", "http://host.docker.internal:2375")
+    containers = []
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(f"{docker_host}/containers/json?all=1")
+            resp.raise_for_status()
+            raw_containers = resp.json()
+
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            for c in raw_containers:
+                cid = c["Id"]
+                name = c["Names"][0].lstrip("/") if c.get("Names") else cid[:12]
+                image = c.get("Image", "")
+                state = c.get("State", "unknown")
+                health = c.get("Status", "")
+                # Parse "healthy"/"unhealthy" from status string like "Up 2 days (healthy)"
+                health_str = "healthy" if "(healthy)" in health else (
+                    "unhealthy" if "(unhealthy)" in health else state
+                )
+
+                # Uptime from "Created" timestamp (Unix epoch)
+                created_ts = c.get("Created", 0)
+                uptime_hours = round((_time.time() - created_ts) / 3600, 1)
+
+                # Stats (CPU + memory)
+                cpu_pct = 0.0
+                mem_mb = 0.0
+                mem_limit_mb = 0.0
+                try:
+                    stats_resp = await client.get(f"{docker_host}/containers/{cid}/stats?stream=false")
+                    if stats_resp.status_code == 200:
+                        s = stats_resp.json()
+                        cpu_delta = (
+                            s["cpu_stats"]["cpu_usage"]["total_usage"]
+                            - s["precpu_stats"]["cpu_usage"]["total_usage"]
+                        )
+                        sys_delta = (
+                            s["cpu_stats"].get("system_cpu_usage", 0)
+                            - s["precpu_stats"].get("system_cpu_usage", 0)
+                        )
+                        num_cpus = len(s["cpu_stats"]["cpu_usage"].get("percpu_usage", [1]))
+                        if sys_delta > 0:
+                            cpu_pct = round((cpu_delta / sys_delta) * num_cpus * 100, 2)
+                        mem_usage = s.get("memory_stats", {}).get("usage", 0)
+                        mem_limit = s.get("memory_stats", {}).get("limit", 1)
+                        mem_mb = round(mem_usage / 1024**2, 1)
+                        mem_limit_mb = round(mem_limit / 1024**2, 1)
+                except Exception as stats_exc:
+                    logger.debug("Stats fetch failed for %s: %s", name, stats_exc)
+
+                containers.append({
+                    "name": name,
+                    "image": image,
+                    "status": state,
+                    "health": health_str,
+                    "cpu_percent": cpu_pct,
+                    "memory_mb": mem_mb,
+                    "memory_limit_mb": mem_limit_mb,
+                    "uptime_hours": uptime_hours,
+                })
+
+    except Exception as exc:
+        logger.warning("Docker API unreachable at %s: %s", docker_host, exc)
+        # Graceful fallback: return known containers with unknown stats
+        containers = [
+            {"name": n, "image": "", "status": "unknown", "health": "unknown",
+             "cpu_percent": 0.0, "memory_mb": 0.0, "memory_limit_mb": 0.0,
+             "uptime_hours": 0.0, "error": "docker_unreachable"}
+            for n in ["life-core", "life-reborn", "life-web", "redis", "qdrant",
+                      "forgejo", "langfuse", "jaeger", "otel-collector", "traefik"]
         ]
-    }
+
+    return {"containers": containers}
 
 
 @infra_router.get("/storage")
