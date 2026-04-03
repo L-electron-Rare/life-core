@@ -104,6 +104,8 @@ class ChatService:
 
         result = {
             "content": response.content,
+            "model": response.model,
+            "provider": response.provider,
             "usage": response.usage if hasattr(response, "usage") else {},
             "trace_id": trace_id,
         }

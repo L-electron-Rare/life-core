@@ -39,7 +39,12 @@ class _StubRouter:
     async def send(self, messages, model, provider=None, **kwargs):
         if self.fail:
             raise RuntimeError("router failure")
-        return LLMResponse(content=f"ok:{messages[-1]['content']}", model=model, provider=provider or "mock")
+        return LLMResponse(
+            content=f"ok:{messages[-1]['content']}",
+            model=f"{model}-resolved",
+            provider=provider or "mock",
+            usage={"input_tokens": 11, "output_tokens": 7},
+        )
 
     async def stream(self, messages, model, provider=None, **kwargs):
         if self.fail:
@@ -132,10 +137,20 @@ async def test_api_routes_without_lifespan(monkeypatch):
 
     chat = await api.chat(api.ChatRequest(messages=[{"role": "user", "content": "x"}]))
     assert chat.content.startswith("ok:")
+    assert chat.model == "claude-3-5-sonnet-20241022-resolved"
+    assert chat.provider == "mock"
+    assert chat.usage.input_tokens == 11
+    assert chat.usage.output_tokens == 7
 
     s = await api.stats()
     assert "chat_service" in s
     assert "router" in s
+
+
+def test_app_import_survives_without_optional_audit_dependency():
+    from life_core.api import app
+
+    assert app is not None
 
 
 @pytest.mark.asyncio

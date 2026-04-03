@@ -15,7 +15,7 @@ from life_core.rag import RAGPipeline
 from life_core.rag.api import rag_router, set_rag_pipeline
 from life_core.infra_api import infra_router
 from life_core.traces_api import traces_router
-from life_core.stats_api import stats_router, record_call
+from life_core.stats_api import stats_router
 from life_core.logs_api import logs_router
 from life_core.conversations_api import conversations_router, set_redis
 from life_core.models_api import models_router
@@ -198,10 +198,17 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     """Réponse de chat."""
+
+    class Usage(BaseModel):
+        """Usage de tokens du provider."""
+
+        input_tokens: int = 0
+        output_tokens: int = 0
+
     content: str
     model: str
     provider: str
-    usage: dict[str, int] = {}
+    usage: Usage = Field(default_factory=Usage)
     trace_id: str = ""
 
 
@@ -299,8 +306,9 @@ async def chat(request: ChatRequest):
 
         return ChatResponse(
             content=result["content"],
-            model=request.model,
-            provider=request.provider or "auto",
+            model=result.get("model", request.model),
+            provider=result.get("provider", request.provider or "auto"),
+            usage=ChatResponse.Usage.model_validate(result.get("usage", {})),
             trace_id=result.get("trace_id", ""),
         )
     except Exception as e:

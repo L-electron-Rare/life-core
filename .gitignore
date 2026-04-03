@@ -86,3 +86,10 @@ tmp/
 temp/
 *.tmp
 .coverage*
+
+# Additional local caches
+.ruff_cache/
+.hypothesis/
+.tox/
+.ipynb_checkpoints/
+.pnpm-store/

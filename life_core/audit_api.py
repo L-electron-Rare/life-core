@@ -2,14 +2,16 @@
 import json
 import logging
 from pathlib import Path
+
 from fastapi import APIRouter, HTTPException
 
 from .audit_analyze_handler import (
+    AuditAnalysisExecutionError,
     AuditAnalyzeRequest,
     AuditAnalyzeResponse,
+    AuditAnalyzerUnavailableError,
     handle_audit_analyze,
 )
-from makelife.audit_analyzer import AnalysisError
 
 logger = logging.getLogger("life_core.audit_api")
 audit_router = APIRouter(prefix="/audit", tags=["Audit"])
@@ -52,6 +54,8 @@ async def analyze_audit(request: AuditAnalyzeRequest) -> AuditAnalyzeResponse:
     try:
         return handle_audit_analyze(request)
     except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
-    except AnalysisError as exc:
-        raise HTTPException(status_code=502, detail=f"LLM analysis failed: {exc}")
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except AuditAnalyzerUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except AuditAnalysisExecutionError as exc:
+        raise HTTPException(status_code=502, detail=f"LLM analysis failed: {exc}") from exc
