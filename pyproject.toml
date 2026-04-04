@@ -21,6 +21,7 @@ dependencies = [
     "langfuse>=2.60,<3",
     "camoufox>=0.4,<1",
     "python-multipart>=0.0.18",
+    "docker>=7.0.0",
 ]
 
 [project.optional-dependencies]

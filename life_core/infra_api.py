@@ -6,8 +6,10 @@ import logging
 import os
 import time as _time
 
+import docker
 import httpx
-from fastapi import APIRouter
+from fastapi import APIRouter, Header, HTTPException
+from pydantic import BaseModel
 
 logger = logging.getLogger("life_core.infra_api")
 
@@ -183,3 +185,50 @@ async def network_status():
         checks["jaeger"] = {"status": "down"}
 
     return checks
+
+
+DEPLOY_TOKEN = os.getenv("DEPLOY_TOKEN", "change-me")
+
+
+class DeployRequest(BaseModel):
+    service: str
+    image: str
+
+
+@infra_router.post("/deploy")
+def deploy(req: DeployRequest, x_deploy_token: str = Header(...)):
+    """Pull a new image and restart a named container."""
+    if x_deploy_token != DEPLOY_TOKEN:
+        raise HTTPException(status_code=403, detail="Invalid deploy token")
+
+    client = docker.from_env()
+
+    # Pull latest image
+    client.images.pull(req.image)
+
+    # Find running container by name
+    containers = client.containers.list(filters={"name": req.service})
+    if not containers:
+        raise HTTPException(status_code=404, detail=f"Container '{req.service}' not found")
+
+    container = containers[0]
+
+    # Capture current config before stop
+    env = container.attrs["Config"]["Env"]
+    ports = container.attrs["HostConfig"]["PortBindings"]
+    network = list(container.attrs["NetworkSettings"]["Networks"].keys())[0]
+
+    container.stop(timeout=10)
+    container.remove()
+
+    client.containers.run(
+        image=req.image,
+        name=req.service,
+        detach=True,
+        environment=env,
+        ports=ports,
+        network=network,
+        restart_policy={"Name": "unless-stopped"},
+    )
+
+    return {"status": "deployed", "service": req.service, "image": req.image}
