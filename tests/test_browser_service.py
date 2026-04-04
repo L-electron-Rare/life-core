@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import sys
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 from fastapi import HTTPException
 
@@ -50,3 +53,144 @@ async def test_scrape_endpoint_error_mapping(monkeypatch):
         await api.scrape(api.ScrapeRequest(url="https://example.com"))
 
     assert err.value.status_code == 503
+
+
+# ---------------------------------------------------------------------------
+# New tests for increased coverage
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_scrape_timeout_ms_zero_raises():
+    """timeout_ms <= 0 must raise BrowserServiceError (lines 33-34)."""
+    service = BrowserService()
+    with pytest.raises(BrowserServiceError, match="timeout_ms must be > 0"):
+        await service.scrape(url="https://example.com", timeout_ms=0)
+
+
+@pytest.mark.asyncio
+async def test_scrape_timeout_ms_negative_raises():
+    """Negative timeout_ms must also raise BrowserServiceError."""
+    service = BrowserService()
+    with pytest.raises(BrowserServiceError, match="timeout_ms must be > 0"):
+        await service.scrape(url="https://example.com", timeout_ms=-1)
+
+
+@pytest.mark.asyncio
+async def test_run_camoufox_import_error_raises_dependency_missing():
+    """When camoufox is not installed, _run_camoufox must raise BrowserDependencyMissingError."""
+    service = BrowserService()
+
+    # Simulate camoufox not being importable by patching the import inside the module
+    with patch.dict(sys.modules, {"camoufox": None, "camoufox.async_api": None}):
+        with pytest.raises(BrowserDependencyMissingError, match="camoufox is not installed"):
+            await service._run_camoufox(url="https://example.com", selector=None, timeout_ms=5000)
+
+
+@pytest.mark.asyncio
+async def test_run_camoufox_successful_no_selector():
+    """Full path through _run_camoufox without selector — returns url/title/content."""
+    service = BrowserService()
+
+    # Build a mock page
+    mock_page = AsyncMock()
+    mock_page.goto = AsyncMock()
+    mock_page.title = AsyncMock(return_value="My Title")
+    mock_page.content = AsyncMock(return_value="<html>body</html>")
+    mock_page.url = "https://example.com/final"
+
+    # Build a mock browser acting as async context manager
+    mock_browser = AsyncMock()
+    mock_browser.new_page = AsyncMock(return_value=mock_page)
+    mock_browser.__aenter__ = AsyncMock(return_value=mock_browser)
+    mock_browser.__aexit__ = AsyncMock(return_value=False)
+
+    mock_async_camoufox_cls = MagicMock(return_value=mock_browser)
+
+    mock_module = MagicMock()
+    mock_module.AsyncCamoufox = mock_async_camoufox_cls
+
+    with patch.dict(sys.modules, {"camoufox": MagicMock(), "camoufox.async_api": mock_module}):
+        result = await service._run_camoufox(
+            url="https://example.com", selector=None, timeout_ms=5000
+        )
+
+    assert result["url"] == "https://example.com/final"
+    assert result["title"] == "My Title"
+    assert result["content"] == "<html>body</html>"
+    mock_page.goto.assert_awaited_once_with(
+        "https://example.com", timeout=5000, wait_until="domcontentloaded"
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_camoufox_successful_with_selector():
+    """Full path through _run_camoufox with a CSS selector — uses locator.text_content()."""
+    service = BrowserService()
+
+    # locator().first returns an object whose text_content() is awaitable
+    mock_element = AsyncMock()
+    mock_element.text_content = AsyncMock(return_value="  Hello World  ")
+
+    mock_locator = MagicMock()
+    mock_locator.first = mock_element
+
+    mock_page = AsyncMock()
+    mock_page.goto = AsyncMock()
+    mock_page.title = AsyncMock(return_value="Selector Title")
+    mock_page.locator = MagicMock(return_value=mock_locator)
+    mock_page.url = "https://example.com"
+
+    mock_browser = AsyncMock()
+    mock_browser.new_page = AsyncMock(return_value=mock_page)
+    mock_browser.__aenter__ = AsyncMock(return_value=mock_browser)
+    mock_browser.__aexit__ = AsyncMock(return_value=False)
+
+    mock_async_camoufox_cls = MagicMock(return_value=mock_browser)
+
+    mock_module = MagicMock()
+    mock_module.AsyncCamoufox = mock_async_camoufox_cls
+
+    with patch.dict(sys.modules, {"camoufox": MagicMock(), "camoufox.async_api": mock_module}):
+        result = await service._run_camoufox(
+            url="https://example.com", selector="h1", timeout_ms=3000
+        )
+
+    assert result["title"] == "Selector Title"
+    assert result["content"] == "Hello World"  # stripped
+    mock_page.locator.assert_called_once_with("h1")
+
+
+@pytest.mark.asyncio
+async def test_run_camoufox_selector_returns_none_content():
+    """When element.text_content() returns None, content must be empty string."""
+    service = BrowserService()
+
+    mock_element = AsyncMock()
+    mock_element.text_content = AsyncMock(return_value=None)
+
+    mock_locator = MagicMock()
+    mock_locator.first = mock_element
+
+    mock_page = AsyncMock()
+    mock_page.goto = AsyncMock()
+    mock_page.title = AsyncMock(return_value="")
+    mock_page.locator = MagicMock(return_value=mock_locator)
+    mock_page.url = "https://example.com"
+
+    mock_browser = AsyncMock()
+    mock_browser.new_page = AsyncMock(return_value=mock_page)
+    mock_browser.__aenter__ = AsyncMock(return_value=mock_browser)
+    mock_browser.__aexit__ = AsyncMock(return_value=False)
+
+    mock_async_camoufox_cls = MagicMock(return_value=mock_browser)
+    mock_module = MagicMock()
+    mock_module.AsyncCamoufox = mock_async_camoufox_cls
+
+    with patch.dict(sys.modules, {"camoufox": MagicMock(), "camoufox.async_api": mock_module}):
+        result = await service._run_camoufox(
+            url="https://example.com", selector=".missing", timeout_ms=5000
+        )
+
+    assert result["content"] == ""
+    assert result["title"] == ""
