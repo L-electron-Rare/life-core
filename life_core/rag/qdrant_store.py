@@ -99,6 +99,43 @@ class QdrantVectorStore:
             )
         return hits
 
+    def search_multi(
+        self,
+        query_embedding: list[float],
+        collections: list[str],
+        top_k: int = 5,
+    ) -> list[SearchHit]:
+        """Search across multiple Qdrant collections, merge by score."""
+        all_hits: list[SearchHit] = []
+        existing = {c.name for c in self.client.get_collections().collections}
+        for coll in collections:
+            if coll not in existing:
+                logger.warning("Collection %s not found, skipping", coll)
+                continue
+            try:
+                results = self.client.query_points(
+                    collection_name=coll,
+                    query=query_embedding,
+                    limit=top_k,
+                )
+                for point in results.points:
+                    payload = point.payload or {}
+                    chunk = Chunk(
+                        content=payload.get("content", ""),
+                        document_id=payload.get("document_id", payload.get("file_path", "")),
+                        chunk_index=payload.get("chunk_index", 0),
+                        metadata={**payload, "collection": coll},
+                    )
+                    all_hits.append(SearchHit(
+                        chunk=chunk,
+                        score=float(point.score or 0.0),
+                        dense_score=float(point.score or 0.0),
+                    ))
+            except Exception as exc:
+                logger.warning("Search failed on collection %s: %s", coll, exc)
+        all_hits.sort(key=lambda h: h.score, reverse=True)
+        return all_hits[:top_k]
+
     def iter_chunks(self) -> list[Chunk]:
         """Scroll all chunks for lightweight lexical retrieval."""
         chunks: list[Chunk] = []

@@ -106,12 +106,17 @@ async def delete_document(doc_id: str):
 
 
 @rag_router.get("/search")
-async def search_documents(q: str, top_k: int = 5):
+async def search_documents(q: str, top_k: int = 5, mode: str | None = None):
     rag = _get_rag()
-    hits = await rag.query_with_scores(q, top_k=top_k)
+    try:
+        hits = await rag.query_with_scores(q, top_k=top_k, mode=mode)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    effective_mode = mode.lower() if mode else getattr(rag, "retrieval_mode", "dense")
     return {
         "query": q,
-        "mode": getattr(rag, "retrieval_mode", "dense"),
+        "mode": effective_mode,
         "results": [
             {
                 "content": hit.chunk.content,

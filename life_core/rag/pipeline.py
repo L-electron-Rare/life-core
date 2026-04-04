@@ -131,7 +131,7 @@ class EmbeddingModel:
         Returns:
             Liste de vecteurs, ou None si Ollama est indisponible.
         """
-        ollama_url = os.environ.get("OLLAMA_URL")
+        ollama_url = os.environ.get("OLLAMA_EMBED_URL") or os.environ.get("OLLAMA_URL")
         if not ollama_url:
             return None
         try:
@@ -166,7 +166,7 @@ class EmbeddingModel:
                 raise ImportError(
                     "sentence-transformers package requis. "
                     "Installez avec: pip install sentence-transformers  "
-                    "(ou définissez OLLAMA_URL pour utiliser Ollama)"
+                    "(ou définissez OLLAMA_EMBED_URL/OLLAMA_URL pour utiliser Ollama)"
                 )
         return self._model
 
@@ -414,20 +414,32 @@ class RAGPipeline:
         merged.sort(key=lambda hit: hit.score, reverse=True)
         return merged[:top_k]
 
-    async def query_with_scores(self, query_text: str, top_k: int = 5) -> list[SearchHit]:
+    def _resolve_retrieval_mode(self, mode: str | None = None) -> str:
+        resolved = (mode or self.retrieval_mode or "dense").strip().lower()
+        if resolved not in {"dense", "hybrid"}:
+            raise ValueError(f"unsupported retrieval mode: {resolved}")
+        return resolved
+
+    async def query_with_scores(
+        self,
+        query_text: str,
+        top_k: int = 5,
+        mode: str | None = None,
+    ) -> list[SearchHit]:
         """Interroger le RAG avec scores détaillés."""
+        retrieval_mode = self._resolve_retrieval_mode(mode)
         query_embedding = await self.embeddings.embed(query_text)
         dense_hits = self.vector_store.search_with_scores(
             query_embedding,
             top_k=self._dense_candidate_count(top_k),
         )
-        if self.retrieval_mode != "hybrid":
+        if retrieval_mode != "hybrid":
             return dense_hits[:top_k]
 
         sparse_hits = self._lexical_hits(query_text, top_k=self._dense_candidate_count(top_k))
         return self._merge_hybrid_hits(dense_hits=dense_hits, sparse_hits=sparse_hits, top_k=top_k)
 
-    async def query(self, query_text: str, top_k: int = 5) -> list[Chunk]:
+    async def query(self, query_text: str, top_k: int = 5, mode: str | None = None) -> list[Chunk]:
         """
         Interroger le RAG.
         
@@ -438,9 +450,14 @@ class RAGPipeline:
         Returns:
             Chunks les plus pertinents
         """
-        return [hit.chunk for hit in await self.query_with_scores(query_text, top_k=top_k)]
+        return [hit.chunk for hit in await self.query_with_scores(query_text, top_k=top_k, mode=mode)]
 
-    async def augment_context(self, query_text: str, top_k: int = 5) -> str:
+    async def augment_context(
+        self,
+        query_text: str,
+        top_k: int = 5,
+        mode: str | None = None,
+    ) -> str:
         """
         Augmenter le contexte pour une requête.
 
@@ -453,6 +470,7 @@ class RAGPipeline:
         """
         from life_core.telemetry import get_tracer
         tracer = get_tracer()
+        retrieval_mode = self._resolve_retrieval_mode(mode)
 
         with tracer.start_as_current_span("rag.embed") as span:
             query_embedding = await self.embeddings.embed(query_text)
@@ -463,7 +481,7 @@ class RAGPipeline:
                 query_embedding,
                 top_k=self._dense_candidate_count(top_k),
             )
-            if self.retrieval_mode == "hybrid":
+            if retrieval_mode == "hybrid":
                 sparse_hits = self._lexical_hits(query_text, top_k=self._dense_candidate_count(top_k))
                 hits = self._merge_hybrid_hits(
                     dense_hits=dense_hits,
@@ -474,7 +492,7 @@ class RAGPipeline:
             else:
                 hits = dense_hits[:top_k]
 
-            span.set_attribute("rag.search_mode", self.retrieval_mode)
+            span.set_attribute("rag.search_mode", retrieval_mode)
             span.set_attribute("rag.results_count", len(hits))
             span.set_attribute("rag.dense_results_count", len(dense_hits))
 
