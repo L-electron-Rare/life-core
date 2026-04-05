@@ -106,17 +106,36 @@ async def delete_document(doc_id: str):
 
 
 @rag_router.get("/search")
-async def search_documents(q: str, top_k: int = 5, mode: str | None = None):
+async def search_documents(
+    q: str, top_k: int = 5, mode: str | None = None, collections: str | None = None
+):
     rag = _get_rag()
-    try:
-        hits = await rag.query_with_scores(q, top_k=top_k, mode=mode)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # Multi-collection search when collections param is provided
+    collection_list = (
+        [c.strip() for c in collections.split(",") if c.strip()]
+        if collections
+        else None
+    )
+
+    if collection_list and hasattr(rag, "vector_store") and rag.vector_store:
+        query_embedding = await rag.embeddings.embed(q)
+        hits = rag.vector_store.search_multi(
+            query_embedding=query_embedding,
+            collections=collection_list,
+            top_k=top_k,
+        )
+    else:
+        try:
+            hits = await rag.query_with_scores(q, top_k=top_k, mode=mode)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     effective_mode = mode.lower() if mode else getattr(rag, "retrieval_mode", "dense")
     return {
         "query": q,
         "mode": effective_mode,
+        "collections": collection_list or ["life_chunks"],
         "results": [
             {
                 "content": hit.chunk.content,
