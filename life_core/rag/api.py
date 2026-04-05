@@ -44,6 +44,8 @@ class SearchResult(BaseModel):
     document_id: str
     chunk_index: int
     score: float = 0.0
+    dense_score: float = 0.0
+    sparse_score: float = 0.0
 
 
 class RagStats(BaseModel):
@@ -104,18 +106,44 @@ async def delete_document(doc_id: str):
 
 
 @rag_router.get("/search")
-async def search_documents(q: str, top_k: int = 5):
+async def search_documents(
+    q: str,
+    top_k: int = 5,
+    mode: str | None = None,
+    collections: str | None = None,
+):
     rag = _get_rag()
-    chunks = await rag.query(q, top_k=top_k)
+
+    collection_list = [item.strip() for item in collections.split(",") if item.strip()] if collections else None
+
+    if collection_list and getattr(rag, "vector_store", None) and hasattr(rag.vector_store, "search_multi"):
+        query_embedding = await rag.embeddings.embed(q)
+        hits = rag.vector_store.search_multi(
+            query_embedding=query_embedding,
+            collections=collection_list,
+            top_k=top_k,
+        )
+    else:
+        try:
+            hits = await rag.query_with_scores(q, top_k=top_k, mode=mode)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    effective_mode = mode.lower() if mode else getattr(rag, "retrieval_mode", "dense")
     return {
         "query": q,
+        "mode": effective_mode,
+        "collections": collection_list or ["life_chunks"],
         "results": [
             {
-                "content": chunk.content,
-                "document_id": chunk.document_id,
-                "chunk_index": chunk.chunk_index,
-                "metadata": chunk.metadata,
+                "content": hit.chunk.content,
+                "document_id": hit.chunk.document_id,
+                "chunk_index": hit.chunk.chunk_index,
+                "metadata": hit.chunk.metadata,
+                "score": hit.score,
+                "dense_score": hit.dense_score,
+                "sparse_score": hit.sparse_score,
             }
-            for chunk in chunks
+            for hit in hits
         ],
     }
