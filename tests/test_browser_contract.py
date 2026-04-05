@@ -10,13 +10,19 @@ import life_core.browser_runner_api as runner_api
 
 
 def _load_browser_scrape_contract() -> dict:
-    contract_path = (
-        Path(__file__).resolve().parents[2]
-        / "finefab-shared"
-        / "schemas"
-        / "browser_scrape.schema.json"
-    )
-    return json.loads(contract_path.read_text())
+    candidates = [
+        (
+            Path(__file__).resolve().parents[2]
+            / "finefab-shared"
+            / "schemas"
+            / "browser_scrape.schema.json"
+        ),
+        Path(__file__).resolve().parent / "fixtures" / "browser_scrape.schema.json",
+    ]
+    for contract_path in candidates:
+        if contract_path.exists():
+            return json.loads(contract_path.read_text())
+    raise FileNotFoundError("Unable to locate browser scrape contract snapshot")
 
 
 def _required_fields(model: type[api.BaseModel]) -> set[str]:
